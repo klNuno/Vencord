@@ -1,0 +1,5 @@
+/* deafen button grayed out when backseat mode is active */
+button.vc-backseat-active[aria-label*="eafen"] {
+    opacity: 0.5;
+    filter: grayscale(0.5);
+}
