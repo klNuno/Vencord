@@ -4,21 +4,22 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import "./style.css";
-
+import { findGroupChildrenByChildId } from "@api/ContextMenu";
 import * as DataStore from "@api/DataStore";
 import { definePluginSettings } from "@api/Settings";
 import { Devs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
 import { findByPropsLazy } from "@webpack";
-import { SelectedChannelStore, UserStore, VoiceStateStore } from "@webpack/common";
+import { Menu, SelectedChannelStore, UserStore, VoiceStateStore } from "@webpack/common";
+
+import managedStyle from "./style.css?managed";
 
 const MediaEngineStore = findByPropsLazy("getMediaEngine");
 
 const settings = definePluginSettings({
     volume: {
         type: OptionType.SLIDER,
-        description: "Volume when backseat mode is active",
+        description: "Volume when backseat mode is active (applies to both voice and UI sounds)",
         markers: [0, 10, 20, 30, 50, 60, 70, 80, 90, 100],
         default: 20,
         stickToMarkers: true
@@ -27,6 +28,23 @@ const settings = definePluginSettings({
         type: OptionType.BOOLEAN,
         description: "Disable backseat mode when you unmute yourself",
         default: false
+    },
+    lowerUISounds: {
+        type: OptionType.BOOLEAN,
+        description: "Lower Discord UI sounds when backseat mode is active",
+        default: true
+    },
+    dimUI: {
+        type: OptionType.BOOLEAN,
+        description: "Dim the Discord UI when backseat mode is active",
+        default: false
+    },
+    dimAmount: {
+        type: OptionType.SLIDER,
+        description: "UI dimming intensity (0 = no dim, 100 = almost black)",
+        markers: [0, 10, 20, 30, 40, 50, 60, 70, 80, 90],
+        default: 50,
+        stickToMarkers: true
     }
 });
 
@@ -68,6 +86,23 @@ function updateButtonVisual() {
     });
 }
 
+function updateDimOverlay() {
+    let overlay = document.getElementById("vc-backseat-dim-overlay");
+
+    if (state.isActive && settings.store.dimUI) {
+        if (!overlay) {
+            overlay = document.createElement("div");
+            overlay.id = "vc-backseat-dim-overlay";
+            document.body.appendChild(overlay);
+        }
+        const opacity = settings.store.dimAmount / 100;
+        overlay.style.setProperty("--backseat-dim-opacity", opacity.toString());
+        overlay.classList.add("vc-backseat-dim-active");
+    } else if (overlay) {
+        overlay.classList.remove("vc-backseat-dim-active");
+    }
+}
+
 async function disableBackseatMode() {
     if (!state.isActive) return;
 
@@ -77,6 +112,7 @@ async function disableBackseatMode() {
     state.lastVoiceChannelId = null;
     state.wasMuted = false;
     updateButtonVisual();
+    updateDimOverlay();
     await clearSavedVolume();
 }
 
@@ -102,6 +138,7 @@ async function enableBackseatMode() {
     state.wasMuted = !!(voiceState?.mute || voiceState?.selfMute);
 
     updateButtonVisual();
+    updateDimOverlay();
 }
 
 async function toggleBackseatMode() {
@@ -130,6 +167,41 @@ export default definePlugin({
     description: "Lower output volume with middle-click on deafen button",
     authors: [Devs.meetsu],
     settings,
+    managedStyle,
+
+    contextMenus: {
+        "audio-device-context"(children) {
+            const group = findGroupChildrenByChildId("audio-device-context-voice-settings", children);
+            if (!group) return;
+
+            const idx = group.findIndex(c => c?.props?.id === "audio-device-context-voice-settings");
+            group.splice(idx, 0,
+                <Menu.MenuCheckboxItem
+                    id="vc-backseat-mode"
+                    label="Backseat Mode"
+                    checked={state.isActive}
+                    action={() => toggleBackseatMode()}
+                />
+            );
+        }
+    },
+
+    patches: [
+        {
+            find: "ensureAudio(){",
+            replacement: {
+                match: /(?=Math\.min\(\i\.\i\.getOutputVolume\(\)\/100)/g,
+                replace: "$self.getUISoundMultiplier()*"
+            },
+        },
+    ],
+
+    getUISoundMultiplier() {
+        if (!state.isActive || !settings.store.lowerUISounds) {
+            return 1;
+        }
+        return settings.store.volume / 100;
+    },
 
     flux: {
         VOICE_STATE_UPDATES({ voiceStates }: { voiceStates: any[]; }) {
@@ -141,7 +213,7 @@ export default definePlugin({
             if (settings.store.disableOnUnmute && state.isActive) {
                 const currentlyMuted = !!(myVoiceState.mute || myVoiceState.selfMute);
 
-                // mute then unmute turns backseat mode off
+                // mute then unmute turns backseat off
                 if (state.wasMuted && !currentlyMuted) {
                     disableBackseatMode();
                     return;
@@ -153,9 +225,7 @@ export default definePlugin({
 
             if (!state.isActive) return;
 
-            // disable when
-
-            // leaving voice channel
+            // disable when leaving voice channel
             if (!myVoiceState.channelId) {
                 disableBackseatMode();
                 return;

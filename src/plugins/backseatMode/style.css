@@ -3,3 +3,21 @@ button.vc-backseat-active[aria-label*="eafen"] {
     opacity: 0.5;
     filter: grayscale(0.5);
 }
+
+/* dim overlay */
+#vc-backseat-dim-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: #000;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 9999;
+    transition: opacity 0.3s ease;
+}
+
+#vc-backseat-dim-overlay.vc-backseat-dim-active {
+    opacity: var(--backseat-dim-opacity, 0.5);
+}
